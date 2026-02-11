@@ -13,13 +13,11 @@ import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.tasks.TaskId;
-import org.elasticsearch.xcontent.ToXContentObject;
-import org.elasticsearch.xcontent.XContentBuilder;
 
 import java.io.IOException;
 import java.util.Objects;
 
-public class ResumeBulkByScrollResponse extends ActionResponse implements ToXContentObject {
+public class ResumeBulkByScrollResponse extends ActionResponse {
 
     private final TaskId taskId;
 
@@ -40,11 +38,4 @@ public class ResumeBulkByScrollResponse extends ActionResponse implements ToXCon
         taskId.writeTo(out);
     }
 
-    @Override
-    public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
-        builder.startObject();
-        builder.field("task", taskId.toString());
-        builder.endObject();
-        return builder;
-    }
 }

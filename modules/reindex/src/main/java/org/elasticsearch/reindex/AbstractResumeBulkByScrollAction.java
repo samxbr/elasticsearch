@@ -62,6 +62,7 @@ public abstract class AbstractResumeBulkByScrollAction<Request extends AbstractB
         }
 
         request.setShouldStoreResult(true);
+        request.setEligibleForRelocationOnShutdown(true);
         Task delegateTask = nodeClient.executeLocally(delegateAction, request, new LoggingTaskListener<>(task));
         TaskId taskId = new TaskId(clusterService.localNode().getId(), delegateTask.getId());
         listener.onResponse(new ResumeBulkByScrollResponse(taskId));
