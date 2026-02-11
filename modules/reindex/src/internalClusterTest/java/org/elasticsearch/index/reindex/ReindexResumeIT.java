@@ -10,6 +10,7 @@
 package org.elasticsearch.index.reindex;
 
 import org.elasticsearch.Version;
+import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsResponse;
 import org.elasticsearch.action.admin.cluster.node.tasks.get.GetTaskResponse;
 import org.elasticsearch.action.search.SearchResponse;
@@ -82,11 +83,14 @@ public class ReindexResumeIT extends ESIntegTestCase {
         // random start time in the past to ensure that "took" is updated
         long startTime = System.nanoTime() - randomTimeValue(2, 10, TimeUnit.HOURS).nanos();
         ReindexRequest request = new ReindexRequest().setSourceIndices(sourceIndex)
+            .setShouldStoreResult(true)
+            .setEligibleForRelocationOnShutdown(true)
             .setDestIndex(destIndex)
             .setSourceBatchSize(batchSize)
             .setRefresh(true)
             .setResumeInfo(new ResumeInfo(new ScrollWorkerResumeInfo(scrollId, startTime, randomStats, null), null));
-        ResumeBulkByScrollResponse resumeResponse = client().execute(ResumeReindexAction.INSTANCE, request).actionGet();
+        ResumeBulkByScrollResponse resumeResponse = client().execute(ResumeReindexAction.INSTANCE, new ResumeBulkByScrollRequest(request))
+            .actionGet();
         GetTaskResponse getTaskResponse = clusterAdmin().prepareGetTask(resumeResponse.getTaskId())
             .setWaitForCompletion(true)
             .setTimeout(TimeValue.timeValueSeconds(30))
@@ -127,6 +131,8 @@ public class ReindexResumeIT extends ESIntegTestCase {
         long startTime = System.nanoTime() - randomTimeValue(2, 10, TimeUnit.HOURS).nanos();
         InetSocketAddress remoteAddress = randomFrom(cluster().httpAddresses());
         ReindexRequest request = new ReindexRequest().setSourceIndices(sourceIndex)
+            .setShouldStoreResult(true)
+            .setEligibleForRelocationOnShutdown(true)
             .setDestIndex(destIndex)
             .setSourceBatchSize(batchSize)
             .setRefresh(true)
@@ -145,7 +151,8 @@ public class ReindexResumeIT extends ESIntegTestCase {
                 )
             )
             .setResumeInfo(new ResumeInfo(new ScrollWorkerResumeInfo(scrollId, startTime, randomStats, Version.CURRENT), null));
-        ResumeBulkByScrollResponse resumeResponse = client().execute(ResumeReindexAction.INSTANCE, request).actionGet();
+        ResumeBulkByScrollResponse resumeResponse = client().execute(ResumeReindexAction.INSTANCE, new ResumeBulkByScrollRequest(request))
+            .actionGet();
         GetTaskResponse getTaskResponse = clusterAdmin().prepareGetTask(resumeResponse.getTaskId())
             .setWaitForCompletion(true)
             .setTimeout(TimeValue.timeValueSeconds(30))
@@ -159,12 +166,44 @@ public class ReindexResumeIT extends ESIntegTestCase {
     }
 
     public void testRejectWithoutResumeInfo() {
-        ReindexRequest request = new ReindexRequest().setSourceIndices("source").setDestIndex("dest");
-        IllegalArgumentException e = expectThrows(
-            IllegalArgumentException.class,
-            () -> client().execute(ResumeReindexAction.INSTANCE, request).actionGet()
+        ReindexRequest reindexRequest = new ReindexRequest().setSourceIndices("source").setDestIndex("dest");
+
+        ActionRequestValidationException e = expectThrows(
+            ActionRequestValidationException.class,
+            () -> client().execute(ResumeReindexAction.INSTANCE, new ResumeBulkByScrollRequest(reindexRequest)).actionGet()
         );
-        assertEquals("No resume information provided", e.getMessage());
+
+        assertTrue(e.getMessage().contains("No resume information provided"));
+    }
+
+    public void testRejectShouldStoreResultFalse() {
+        ReindexRequest reindexRequest = new ReindexRequest().setSourceIndices("source")
+            .setDestIndex("dest")
+            .setShouldStoreResult(false)
+            .setEligibleForRelocationOnShutdown(true)
+            .setResumeInfo(new ResumeInfo(new ScrollWorkerResumeInfo("ignored", 0L, randomStats(), null), null));
+
+        ActionRequestValidationException e = expectThrows(
+            ActionRequestValidationException.class,
+            () -> client().execute(ResumeReindexAction.INSTANCE, new ResumeBulkByScrollRequest(reindexRequest)).actionGet()
+        );
+
+        assertTrue(e.getMessage().contains("Resumed task result should be stored"));
+    }
+
+    public void testRejectEligibleForRelocationOnShutdownFalse() {
+        ReindexRequest reindexRequest = new ReindexRequest().setSourceIndices("source")
+            .setDestIndex("dest")
+            .setShouldStoreResult(true)
+            .setEligibleForRelocationOnShutdown(false)
+            .setResumeInfo(new ResumeInfo(new ScrollWorkerResumeInfo("ignored", 0L, randomStats(), null), null));
+
+        ActionRequestValidationException e = expectThrows(
+            ActionRequestValidationException.class,
+            () -> client().execute(ResumeReindexAction.INSTANCE, new ResumeBulkByScrollRequest(reindexRequest)).actionGet()
+        );
+
+        assertTrue(e.getMessage().contains("Resumed task should be eligible for relocation on shutdown"));
     }
 
     private BulkByScrollTask.Status randomStats() {

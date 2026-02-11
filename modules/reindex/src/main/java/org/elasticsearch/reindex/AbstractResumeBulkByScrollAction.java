@@ -18,6 +18,7 @@ import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.index.reindex.AbstractBulkByScrollRequest;
 import org.elasticsearch.index.reindex.BulkByScrollResponse;
+import org.elasticsearch.index.reindex.ResumeBulkByScrollRequest;
 import org.elasticsearch.index.reindex.ResumeBulkByScrollResponse;
 import org.elasticsearch.tasks.LoggingTaskListener;
 import org.elasticsearch.tasks.Task;
@@ -31,7 +32,7 @@ import java.util.concurrent.Executor;
  * node, then returns a {@link ResumeBulkByScrollResponse} containing the task id of the delegate action.
  */
 public abstract class AbstractResumeBulkByScrollAction<Request extends AbstractBulkByScrollRequest<Request>> extends HandledTransportAction<
-    Request,
+    ResumeBulkByScrollRequest,
     ResumeBulkByScrollResponse> {
 
     private final ClusterService clusterService;
@@ -42,7 +43,7 @@ public abstract class AbstractResumeBulkByScrollAction<Request extends AbstractB
         String actionName,
         TransportService transportService,
         ActionFilters actionFilters,
-        Writeable.Reader<Request> requestReader,
+        Writeable.Reader<ResumeBulkByScrollRequest> requestReader,
         Executor executor,
         ClusterService clusterService,
         ActionType<BulkByScrollResponse> delegateAction,
@@ -55,15 +56,8 @@ public abstract class AbstractResumeBulkByScrollAction<Request extends AbstractB
     }
 
     @Override
-    protected void doExecute(Task task, Request request, ActionListener<ResumeBulkByScrollResponse> listener) {
-        if (request.getResumeInfo().isEmpty()) {
-            listener.onFailure(new IllegalArgumentException("No resume information provided"));
-            return;
-        }
-
-        request.setShouldStoreResult(true);
-        request.setEligibleForRelocationOnShutdown(true);
-        Task delegateTask = nodeClient.executeLocally(delegateAction, request, new LoggingTaskListener<>(task));
+    protected void doExecute(Task task, ResumeBulkByScrollRequest request, ActionListener<ResumeBulkByScrollResponse> listener) {
+        Task delegateTask = nodeClient.executeLocally(delegateAction, request.getDelegate(), new LoggingTaskListener<>(task));
         TaskId taskId = new TaskId(clusterService.localNode().getId(), delegateTask.getId());
         listener.onResponse(new ResumeBulkByScrollResponse(taskId));
     }

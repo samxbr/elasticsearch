@@ -15,6 +15,7 @@ import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.index.reindex.ReindexAction;
 import org.elasticsearch.index.reindex.ReindexRequest;
+import org.elasticsearch.index.reindex.ResumeBulkByScrollRequest;
 import org.elasticsearch.index.reindex.ResumeReindexAction;
 import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.transport.TransportService;
@@ -32,7 +33,7 @@ public class TransportResumeReindexAction extends AbstractResumeBulkByScrollActi
             ResumeReindexAction.NAME,
             transportService,
             actionFilters,
-            ReindexRequest::new,
+            in -> new ResumeBulkByScrollRequest(in, ReindexRequest::new),
             EsExecutors.DIRECT_EXECUTOR_SERVICE,
             clusterService,
             ReindexAction.INSTANCE,
