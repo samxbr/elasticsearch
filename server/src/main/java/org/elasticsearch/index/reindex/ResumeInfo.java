@@ -24,6 +24,10 @@ import java.util.Optional;
 /**
  * Holds resume state information for a {@link BulkByScrollTask} task to be resumed from a previous run. It may contain a WorkerResumeInfo
  * which keeps the state for a single worker task, or a map of SliceResumeInfo which keeps the state for each slice of a leader task.
+ *
+ * Note: For sliced tasks, all slices should be included in the resume info, even if some of them are completed. This is so that the final
+ * task have a complete result from all the slices. It is possible that a task can be resumed multiple times, all completed slices should
+ * be passed along to subsequent resumes until the task is fully completed.
  */
 public record ResumeInfo(@Nullable WorkerResumeInfo worker, @Nullable Map<Integer, SliceStatus> slices) implements Writeable {
 
@@ -59,6 +63,14 @@ public record ResumeInfo(@Nullable WorkerResumeInfo worker, @Nullable Map<Intege
 
     public Optional<SliceStatus> getSlice(int sliceId) {
         return slices == null ? Optional.empty() : Optional.ofNullable(slices.get(sliceId));
+    }
+
+    public boolean isSliceCompleted(int sliceId) {
+        Optional<SliceStatus> slice = getSlice(sliceId);
+        if (slice.isEmpty()) {
+            throw new IllegalArgumentException("slice id " + sliceId + " does not exist in resume info");
+        }
+        return slice.get().isCompleted();
     }
 
     /**
@@ -123,6 +135,14 @@ public record ResumeInfo(@Nullable WorkerResumeInfo worker, @Nullable Map<Intege
             out.writeOptionalWriteable(response);
             out.writeOptionalException(failure);
         }
+
+        public Optional<BulkByScrollResponse> getResponse() {
+            return Optional.ofNullable(response);
+        }
+
+        public Optional<Exception> getFailure() {
+            return Optional.ofNullable(failure);
+        }
     }
 
     /**
@@ -150,6 +170,10 @@ public record ResumeInfo(@Nullable WorkerResumeInfo worker, @Nullable Map<Intege
             out.writeVInt(sliceId);
             out.writeOptionalNamedWriteable(resumeInfo);
             out.writeOptionalWriteable(result);
+        }
+
+        public boolean isCompleted() {
+            return result != null;
         }
     }
 
