@@ -25,9 +25,9 @@ import java.util.Optional;
  * Holds resume state information for a {@link BulkByScrollTask} task to be resumed from a previous run. It may contain a WorkerResumeInfo
  * which keeps the state for a single worker task, or a map of SliceResumeInfo which keeps the state for each slice of a leader task.
  *
- * Note: For sliced tasks, all slices should be included in the resume info, even if some of them are completed. This is so that the final
- * task have a complete result from all the slices. It is possible that a task can be resumed multiple times, all completed slices should
- * be passed along to subsequent resumes until the task is fully completed.
+ * Note: For sliced tasks, resume info must include all slices, including those that are already completed. This ensures that the final
+ * task has a complete result from all slices. A task may be resumed multiple times, so information for completed slices must be carried
+ * forward to each subsequent resume until the task is fully completed.
  */
 public record ResumeInfo(@Nullable WorkerResumeInfo worker, @Nullable Map<Integer, SliceStatus> slices) implements Writeable {
 
