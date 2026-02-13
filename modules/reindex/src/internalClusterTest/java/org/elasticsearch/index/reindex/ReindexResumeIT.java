@@ -553,17 +553,6 @@ public class ReindexResumeIT extends ESIntegTestCase {
         return total;
     }
 
-    private int getSourceShardCount(String sourceIndex) {
-        ClusterSearchShardsResponse response = client().execute(
-            TransportClusterSearchShardsAction.TYPE,
-            new ClusterSearchShardsRequest(TimeValue.timeValueSeconds(30), sourceIndex)
-        ).actionGet();
-        Map<Index, Integer> countsByIndex = Arrays.stream(response.getGroups())
-            .collect(Collectors.toMap(g -> g.getShardId().getIndex(), g -> 1, (a, b) -> a + b));
-        Set<Integer> counts = countsByIndex.isEmpty() ? Set.of(1) : new HashSet<>(countsByIndex.values());
-        return counts.isEmpty() ? 1 : Collections.min(counts);
-    }
-
     private static void assertSlicedResponse(TaskResult taskResult, Map<Integer, SliceStatus> resumeStatus, long totalDocs, int batchSize) {
         assertTrue(taskResult.isCompleted());
         Map<String, Object> response = taskResult.getResponseAsMap();
