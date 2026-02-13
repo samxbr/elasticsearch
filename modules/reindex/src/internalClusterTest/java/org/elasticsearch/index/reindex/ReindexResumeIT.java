@@ -176,9 +176,9 @@ public class ReindexResumeIT extends ESIntegTestCase {
     public void testLocalResumeReindexFromScroll_slicedN() {
         String sourceIndex = randomAlphanumericOfLength(10).toLowerCase(Locale.ROOT);
         String destIndex = randomAlphanumericOfLength(10).toLowerCase(Locale.ROOT);
-        final int totalDocs = randomIntBetween(100, 200);
+        final int totalDocs = randomIntBetween(200, 300);
         final int numSlices = randomIntBetween(2, 5);
-        final int batchSize = randomIntBetween(2, 10);
+        final int batchSize = randomIntBetween(5, 10);
         // the first manual search batch creates the scroll, and is not indexed into destination
         final long expectedDocsDest = totalDocs - numSlices * batchSize;
 
@@ -197,6 +197,7 @@ public class ReindexResumeIT extends ESIntegTestCase {
             try {
                 String scrollId = searchResponse.getScrollId();
                 assertNotNull(scrollId);
+                assertEquals(batchSize, searchResponse.getHits().getHits().length);
                 BulkByScrollTask.Status sliceStats = randomStats(sliceId, searchResponse.getHits().getTotalHits().value());
                 sliceStatus.put(sliceId, new SliceStatus(sliceId, new ScrollWorkerResumeInfo(scrollId, startTime, sliceStats, null), null));
             } finally {
@@ -227,9 +228,9 @@ public class ReindexResumeIT extends ESIntegTestCase {
     public void testLocalResumeReindexFromScroll_slicedN_partialCompleted() {
         String sourceIndex = randomAlphanumericOfLength(10).toLowerCase(Locale.ROOT);
         String destIndex = randomAlphanumericOfLength(10).toLowerCase(Locale.ROOT);
-        final int totalDocs = randomIntBetween(100, 200);
+        final int totalDocs = randomIntBetween(200, 300);
         final int numSlices = randomIntBetween(2, 5);
-        final int batchSize = randomIntBetween(2, 10);
+        final int batchSize = randomIntBetween(5, 10);
         final int numCompletedSlices = randomIntBetween(1, numSlices - 1);
         final int numPendingSlices = numSlices - numCompletedSlices;
         // num docs in dest = manually completed slices + resumed slices (exclude first batch)
@@ -262,6 +263,7 @@ public class ReindexResumeIT extends ESIntegTestCase {
             try {
                 String scrollId = searchResponse.getScrollId();
                 assertNotNull(scrollId);
+                assertEquals(batchSize, searchResponse.getHits().getHits().length);
                 BulkByScrollTask.Status sliceStats = randomStats(sliceId, searchResponse.getHits().getTotalHits().value());
                 sliceStatus.put(sliceId, new SliceStatus(sliceId, new ScrollWorkerResumeInfo(scrollId, startTime, sliceStats, null), null));
             } finally {
@@ -293,8 +295,8 @@ public class ReindexResumeIT extends ESIntegTestCase {
     public void testLocalResumeReindexFromScroll_slicedAuto() {
         String sourceIndex = randomAlphanumericOfLength(10).toLowerCase(Locale.ROOT);
         String destIndex = randomAlphanumericOfLength(10).toLowerCase(Locale.ROOT);
-        final int totalDocs = randomIntBetween(100, 200);
-        final int batchSize = randomIntBetween(2, 10);
+        final int totalDocs = randomIntBetween(200, 300);
+        final int batchSize = randomIntBetween(5, 10);
         // at least 2 shards to ensure auto-slicing creates multiple slices
         int numSourceShards = randomIntBetween(2, 10);
         // slice count differs from shard count to ensure slicing is from resume info
@@ -316,6 +318,7 @@ public class ReindexResumeIT extends ESIntegTestCase {
             try {
                 String scrollId = searchResponse.getScrollId();
                 assertNotNull(scrollId);
+                assertEquals(batchSize, searchResponse.getHits().getHits().length);
                 BulkByScrollTask.Status sliceStats = randomStats(sliceId, searchResponse.getHits().getTotalHits().value());
                 sliceStatus.put(sliceId, new SliceStatus(sliceId, new ScrollWorkerResumeInfo(scrollId, startTime, sliceStats, null), null));
             } finally {
@@ -354,8 +357,8 @@ public class ReindexResumeIT extends ESIntegTestCase {
     public void testLocalResumeReindexFromScroll_slicedManual() {
         String sourceIndex = randomAlphanumericOfLength(10).toLowerCase(Locale.ROOT);
         String destIndex = randomAlphanumericOfLength(10).toLowerCase(Locale.ROOT);
-        final int totalDocs = randomIntBetween(100, 200);
-        final int batchSize = randomIntBetween(2, 10);
+        final int totalDocs = randomIntBetween(200, 300);
+        final int batchSize = randomIntBetween(5, 10);
         final int numSlices = randomIntBetween(2, 5);
 
         createIndex(sourceIndex);
@@ -376,6 +379,7 @@ public class ReindexResumeIT extends ESIntegTestCase {
             try {
                 scrollId = searchResponse.getScrollId();
                 assertNotNull(scrollId);
+                assertEquals(batchSize, searchResponse.getHits().getHits().length);
                 sliceStats = randomStats(sliceId, searchResponse.getHits().getTotalHits().value());
                 totalHits = searchResponse.getHits().getTotalHits().value();
             } finally {
