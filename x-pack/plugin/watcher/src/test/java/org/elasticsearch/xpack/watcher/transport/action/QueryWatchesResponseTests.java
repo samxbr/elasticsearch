@@ -112,7 +112,7 @@ public class QueryWatchesResponseTests extends AbstractXContentSerializingTestCa
         List<QueryWatchesAction.Response.Item> watches = new ArrayList<>(instance.getWatches());
 
         switch (randomIntBetween(0, 1)) {
-            case 0 -> watchTotalCount = randomValueOtherThan(watchTotalCount, this::randomLong);
+            case 0 -> watchTotalCount = randomValueOtherThan(watchTotalCount, () -> randomLong());
             case 1 -> {
                 if (watches.isEmpty() || randomBoolean()) {
                     watches.add(createRandomItem());
@@ -162,7 +162,7 @@ public class QueryWatchesResponseTests extends AbstractXContentSerializingTestCa
                 item.getId(),
                 item.getSource(),
                 item.getStatus(),
-                randomValueOtherThan(item.getSeqNo(), this::randomLong),
+                randomValueOtherThan(item.getSeqNo(), () -> randomLong()),
                 item.getPrimaryTerm()
             );
             case 2 -> new QueryWatchesAction.Response.Item(
@@ -170,7 +170,7 @@ public class QueryWatchesResponseTests extends AbstractXContentSerializingTestCa
                 item.getSource(),
                 item.getStatus(),
                 item.getSeqNo(),
-                randomValueOtherThan(item.getPrimaryTerm(), this::randomNonNegativeLong)
+                randomValueOtherThan(item.getPrimaryTerm(), () -> randomNonNegativeLong())
             );
             default -> throw new IllegalStateException("unexpected mutation branch");
         };
