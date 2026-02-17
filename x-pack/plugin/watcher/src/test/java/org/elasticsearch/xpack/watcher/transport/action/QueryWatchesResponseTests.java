@@ -108,7 +108,23 @@ public class QueryWatchesResponseTests extends AbstractXContentSerializingTestCa
 
     @Override
     protected QueryWatchesAction.Response mutateInstance(QueryWatchesAction.Response instance) {
-        return null;// TODO implement https://github.com/elastic/elasticsearch/issues/25929
+        long watchTotalCount = instance.getWatchTotalCount();
+        List<QueryWatchesAction.Response.Item> watches = new ArrayList<>(instance.getWatches());
+
+        switch (randomIntBetween(0, 1)) {
+            case 0 -> watchTotalCount = randomValueOtherThan(watchTotalCount, this::randomLong);
+            case 1 -> {
+                if (watches.isEmpty() || randomBoolean()) {
+                    watches.add(createRandomItem());
+                } else {
+                    int index = randomIntBetween(0, watches.size() - 1);
+                    watches.set(index, mutateItem(watches.get(index)));
+                }
+            }
+            default -> throw new IllegalStateException("unexpected mutation branch");
+        }
+
+        return new QueryWatchesAction.Response(watchTotalCount, watches);
     }
 
     private Watch createWatch(String watchId) {
@@ -120,6 +136,44 @@ public class QueryWatchesResponseTests extends AbstractXContentSerializingTestCa
             mock(WatcherSearchTemplateService.class),
             logger
         );
+    }
+
+    private QueryWatchesAction.Response.Item createRandomItem() {
+        String watchId = randomAlphaOfLength(4);
+        Watch watch = createWatch(watchId);
+        try (XContentBuilder builder = jsonBuilder()) {
+            watch.toXContent(builder, WatcherParams.builder().hideSecrets(true).includeStatus(false).build());
+            return new QueryWatchesAction.Response.Item(watchId, new XContentSource(builder), watch.status(), randomLong(), randomNonNegativeLong());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private QueryWatchesAction.Response.Item mutateItem(QueryWatchesAction.Response.Item item) {
+        return switch (randomIntBetween(0, 2)) {
+            case 0 -> new QueryWatchesAction.Response.Item(
+                randomValueOtherThan(item.getId(), () -> randomAlphaOfLength(4)),
+                item.getSource(),
+                item.getStatus(),
+                item.getSeqNo(),
+                item.getPrimaryTerm()
+            );
+            case 1 -> new QueryWatchesAction.Response.Item(
+                item.getId(),
+                item.getSource(),
+                item.getStatus(),
+                randomValueOtherThan(item.getSeqNo(), this::randomLong),
+                item.getPrimaryTerm()
+            );
+            case 2 -> new QueryWatchesAction.Response.Item(
+                item.getId(),
+                item.getSource(),
+                item.getStatus(),
+                item.getSeqNo(),
+                randomValueOtherThan(item.getPrimaryTerm(), this::randomNonNegativeLong)
+            );
+            default -> throw new IllegalStateException("unexpected mutation branch");
+        };
     }
 
     @Override

@@ -43,20 +43,15 @@ public class QueryWatchesRequestTests extends AbstractXContentSerializingTestCas
     protected QueryWatchesAction.Request createTestInstance() {
         QueryBuilder query = null;
         if (randomBoolean()) {
-            query = QueryBuilders.termQuery(randomAlphaOfLengthBetween(5, 20), randomAlphaOfLengthBetween(5, 20));
+            query = randomQuery();
         }
         List<FieldSortBuilder> sorts = null;
         if (randomBoolean()) {
-            int numSorts = randomIntBetween(1, 3);
-            sorts = new ArrayList<>(numSorts);
-            for (int i = 0; i < numSorts; i++) {
-                sorts.add(SortBuilders.fieldSort(randomAlphaOfLengthBetween(5, 20)).order(randomFrom(SortOrder.values())));
-            }
+            sorts = randomSorts();
         }
         SearchAfterBuilder searchAfter = null;
         if (randomBoolean()) {
-            searchAfter = new SearchAfterBuilder();
-            searchAfter.setSortValues(new Object[] { randomInt() });
+            searchAfter = randomSearchAfter();
         }
         return new QueryWatchesAction.Request(
             randomBoolean() ? randomIntBetween(0, 10000) : null,
@@ -69,7 +64,65 @@ public class QueryWatchesRequestTests extends AbstractXContentSerializingTestCas
 
     @Override
     protected QueryWatchesAction.Request mutateInstance(QueryWatchesAction.Request instance) {
-        return null;// TODO implement https://github.com/elastic/elasticsearch/issues/25929
+        Integer from = instance.getFrom();
+        Integer size = instance.getSize();
+        QueryBuilder query = instance.getQuery();
+        List<FieldSortBuilder> sorts = instance.getSorts();
+        SearchAfterBuilder searchAfter = instance.getSearchAfter();
+
+        switch (randomIntBetween(0, 4)) {
+            case 0 -> from = from == null ? randomIntBetween(0, 10000) : randomValueOtherThan(from, () -> randomIntBetween(0, 10000));
+            case 1 -> size = size == null ? randomIntBetween(0, 10000) : randomValueOtherThan(size, () -> randomIntBetween(0, 10000));
+            case 2 -> {
+                if (query == null) {
+                    query = randomQuery();
+                } else if (randomBoolean()) {
+                    query = null;
+                } else {
+                    query = randomValueOtherThan(query, this::randomQuery);
+                }
+            }
+            case 3 -> {
+                if (sorts == null) {
+                    sorts = randomSorts();
+                } else if (randomBoolean()) {
+                    sorts = null;
+                } else {
+                    sorts = randomValueOtherThan(sorts, this::randomSorts);
+                }
+            }
+            case 4 -> {
+                if (searchAfter == null) {
+                    searchAfter = randomSearchAfter();
+                } else if (randomBoolean()) {
+                    searchAfter = null;
+                } else {
+                    searchAfter = randomValueOtherThan(searchAfter, this::randomSearchAfter);
+                }
+            }
+            default -> throw new IllegalStateException("unexpected mutation branch");
+        }
+
+        return new QueryWatchesAction.Request(from, size, query, sorts, searchAfter);
+    }
+
+    private QueryBuilder randomQuery() {
+        return QueryBuilders.termQuery(randomAlphaOfLengthBetween(5, 20), randomAlphaOfLengthBetween(5, 20));
+    }
+
+    private List<FieldSortBuilder> randomSorts() {
+        int numSorts = randomIntBetween(1, 3);
+        List<FieldSortBuilder> sorts = new ArrayList<>(numSorts);
+        for (int i = 0; i < numSorts; i++) {
+            sorts.add(SortBuilders.fieldSort(randomAlphaOfLengthBetween(5, 20)).order(randomFrom(SortOrder.values())));
+        }
+        return sorts;
+    }
+
+    private SearchAfterBuilder randomSearchAfter() {
+        SearchAfterBuilder searchAfter = new SearchAfterBuilder();
+        searchAfter.setSortValues(new Object[] { randomInt() });
+        return searchAfter;
     }
 
     @Override
