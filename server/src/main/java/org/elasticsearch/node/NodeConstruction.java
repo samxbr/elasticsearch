@@ -199,6 +199,7 @@ import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.plugins.PluginsLoader;
 import org.elasticsearch.plugins.PluginsService;
 import org.elasticsearch.plugins.RecoveryPlannerPlugin;
+import org.elasticsearch.plugins.RecoveryPlugin;
 import org.elasticsearch.plugins.ReloadablePlugin;
 import org.elasticsearch.plugins.RepositoryPlugin;
 import org.elasticsearch.plugins.ScriptPlugin;
@@ -932,6 +933,7 @@ class NodeConstruction {
         };
 
         final CompositeRecoverySchedulingListener recoverySchedulingListeners = new CompositeRecoverySchedulingListener();
+        // Recovery gates are contributed by plugins (RecoveryPlugin#getRecoveryGates) and registered below, once plugin components exist.
         final ThrottlingRecoveryService throttlingRecoveryService = new ThrottlingRecoveryService(
             threadPool,
             projectResolver,
@@ -1118,6 +1120,11 @@ class NodeConstruction {
             // Return both
             return Stream.of(componentObjects, componentsFromInjector).flatMap(Collection::stream).toList();
         }).toList();
+
+        // Register plugin-contributed recovery gates with the throttling service.
+        pluginsService.filterPlugins(RecoveryPlugin.class)
+            .flatMap(recoveryPlugin -> recoveryPlugin.getRecoveryGates().stream())
+            .forEach(throttlingRecoveryService::addGate);
 
         var terminationHandlers = pluginsService.loadServiceProviders(TerminationHandlerProvider.class)
             .stream()

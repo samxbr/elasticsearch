@@ -46,6 +46,9 @@ import java.util.function.Supplier;
 /// released when the recovery's [RecoveryListener] completes.
 /// The max number of concurrent recovery slots is controlled by the [#INDICES_RECOVERY_MAX_CONCURRENT_RECOVERIES_SETTING]
 /// dynamic setting.
+///
+/// Dispatch is also subject to the node's [RecoveryGates]: while they block, no queued recovery is dispatched. [#fillSlots] consults
+/// them on every dispatch attempt and re-runs when a gate signals a change.
 public final class ThrottlingRecoveryService extends AbstractLifecycleComponent implements ClusterStateListener {
 
     private static final Logger logger = LogManager.getLogger(ThrottlingRecoveryService.class);
@@ -67,6 +70,7 @@ public final class ThrottlingRecoveryService extends AbstractLifecycleComponent 
     private final ProjectResolver projectResolver;
     private final ClusterService clusterService;
     private final RecoverySchedulingListener schedulingListener;
+    private final RecoveryGates recoveryGates;
 
     private int maxConcurrentRecoveries;
     private int runningRecoveries = 0;
@@ -88,6 +92,17 @@ public final class ThrottlingRecoveryService extends AbstractLifecycleComponent 
         this.projectResolver = projectResolver;
         this.schedulingListener = schedulingListener;
         this.clusterService = clusterService;
+        this.recoveryGates = new RecoveryGates(
+            this::fillSlots,
+            schedulingListener::onRecoveriesBlocked,
+            schedulingListener::onRecoveriesUnblocked,
+            threadPool::relativeTimeInMillis
+        );
+    }
+
+    /// Registers a recovery gate that can hold recoveries back beyond the concurrency bound. Called at startup.
+    public void addGate(RecoveryGate gate) {
+        recoveryGates.addGate(gate);
     }
 
     @Override
@@ -282,18 +297,19 @@ public final class ThrottlingRecoveryService extends AbstractLifecycleComponent 
         return lifecycle.stoppedOrClosed();
     }
 
-    /// Drains the pending queue up to the max slot capacity
+    /// Consults the recovery gates via [RecoveryGates#check] (off this service's lock) and drains the pending queue up to the max slot
+    /// capacity. Called on every enqueue, slot release, and gate change.
     private void fillSlots() {
+        final RecoveryGate.Decision decision = recoveryGates.check();
         final List<PendingRecovery> recoveriesToDispatch = new ArrayList<>();
         synchronized (this) {
-            if (isClosed()) {
-                return;
-            }
-            while (pendingRecoveries.isEmpty() == false && runningRecoveries < maxConcurrentRecoveries) {
-                final PendingRecovery recovery = pendingRecoveries.poll();
-                recoveriesToDispatch.add(recovery);
-                runningRecoveries++;
-                recovery.stats().targetRecoveryDequeuedAndStarted(recovery.recoveryState().getRecoverySource().getType());
+            if (isClosed() == false && decision.mayRun()) {
+                while (pendingRecoveries.isEmpty() == false && runningRecoveries < maxConcurrentRecoveries) {
+                    final PendingRecovery recovery = pendingRecoveries.poll();
+                    recoveriesToDispatch.add(recovery);
+                    runningRecoveries++;
+                    recovery.stats().targetRecoveryDequeuedAndStarted(recovery.recoveryState().getRecoverySource().getType());
+                }
             }
         }
         for (PendingRecovery recovery : recoveriesToDispatch) {

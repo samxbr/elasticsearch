@@ -54,6 +54,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.elasticsearch.indices.recovery.ThrottlingRecoveryService.INDICES_RECOVERY_MAX_CONCURRENT_RECOVERIES_SETTING;
@@ -1057,6 +1058,151 @@ public class ThrottlingRecoveryServiceTests extends ESTestCase {
 
         public boolean wasNotified() {
             return super.isDone();
+        }
+    }
+
+    public void testGateBlocksAllRecoveriesUntilItAllows() {
+        final var taskQueue = new DeterministicTaskQueue();
+        final var service = new ThrottlingRecoveryService(
+            taskQueue.getThreadPool(),
+            DefaultProjectResolver.INSTANCE,
+            newClusterService(Integer.MAX_VALUE), // plenty of slots, so only the gate can hold recoveries back
+            RecoverySchedulingListener.NOOP
+        );
+        service.start();
+        // A blocking gate holds every recovery back until it flips to run.
+        final var gate = new ControllableGate(RecoveryGate.Decision.block(randomIdentifier(), randomAlphaOfLengthBetween(5, 30)));
+        service.addGate(gate);
+
+        final var started = new AtomicInteger();
+        final int count = between(2, 5);
+        for (int i = 0; i < count; i++) {
+            service.enqueue(ProjectId.DEFAULT, RecoveryListener.NOOP, newRecoveryState(), UUIDs.randomBase64UUID(), stats, listener -> {
+                started.incrementAndGet();
+                listener.onRecoveryDone(null, ShardLongFieldRange.EMPTY, ShardLongFieldRange.EMPTY);
+            });
+        }
+
+        taskQueue.runAllRunnableTasks();
+        assertThat("gate should hold every recovery back", started.get(), equalTo(0));
+        assertThat(service.currentQueueSize(), equalTo(count));
+
+        // Conditions improve: the gate flips to run, which wakes the scheduler and dispatches everything.
+        gate.set(RecoveryGate.Decision.RUN);
+        taskQueue.runAllRunnableTasks();
+        assertThat(started.get(), equalTo(count));
+        assertThat(service.currentQueueSize(), equalTo(0));
+    }
+
+    public void testEmptyGateDispatchesImmediately() {
+        final var taskQueue = new DeterministicTaskQueue();
+        final var service = new ThrottlingRecoveryService(
+            taskQueue.getThreadPool(),
+            DefaultProjectResolver.INSTANCE,
+            newClusterService(Integer.MAX_VALUE),
+            RecoverySchedulingListener.NOOP
+        );
+        service.start();
+        final var started = new AtomicInteger();
+        final int count = between(1, 100);
+        for (int i = 0; i < count; i++) {
+            service.enqueue(ProjectId.DEFAULT, RecoveryListener.NOOP, newRecoveryState(), UUIDs.randomBase64UUID(), stats, listener -> {
+                started.incrementAndGet();
+                listener.onRecoveryDone(null, ShardLongFieldRange.EMPTY, ShardLongFieldRange.EMPTY);
+            });
+        }
+        taskQueue.runAllRunnableTasks();
+        assertThat(started.get(), equalTo(count));
+        assertThat(service.currentQueueSize(), equalTo(0));
+    }
+
+    public void testGateBlockedTimeIsReported() {
+        final var taskQueue = new DeterministicTaskQueue();
+
+        final var blockedGate = new AtomicReference<String>();
+        final var unblockedGate = new AtomicReference<String>();
+        final var blockedCount = new AtomicInteger();
+        final var unblockedCount = new AtomicInteger();
+        final var reportedBlockedMillis = new AtomicLong(-1);
+        final RecoverySchedulingListener listener = new RecoverySchedulingListener() {
+            @Override
+            public void onRecoveriesBlocked(String gateName) {
+                blockedGate.set(gateName);
+                blockedCount.incrementAndGet();
+            }
+
+            @Override
+            public void onRecoveriesUnblocked(String gateName, long blockedTimeMillis) {
+                unblockedGate.set(gateName);
+                unblockedCount.incrementAndGet();
+                reportedBlockedMillis.set(blockedTimeMillis);
+            }
+        };
+        final var service = new ThrottlingRecoveryService(
+            taskQueue.getThreadPool(),
+            DefaultProjectResolver.INSTANCE,
+            newClusterService(Integer.MAX_VALUE), // plenty of slots, so only the gate can hold recoveries back
+            listener
+        );
+        service.start();
+
+        final String gateName = randomIdentifier();
+        final var gate = new ControllableGate(RecoveryGate.Decision.block(gateName, randomAlphaOfLengthBetween(5, 30)));
+        service.addGate(gate);
+
+        final var started = new AtomicInteger();
+        final int count = between(1, 100);
+        for (int i = 0; i < count; i++) {
+            service.enqueue(ProjectId.DEFAULT, RecoveryListener.NOOP, newRecoveryState(), UUIDs.randomBase64UUID(), stats, l -> {
+                started.incrementAndGet();
+                l.onRecoveryDone(null, ShardLongFieldRange.EMPTY, ShardLongFieldRange.EMPTY);
+            });
+        }
+        taskQueue.runAllRunnableTasks();
+        assertThat(started.get(), equalTo(0));
+        // The block is reported exactly once (on the first dispatch attempt), naming the responsible gate.
+        assertThat(blockedCount.get(), equalTo(1));
+        assertThat(blockedGate.get(), equalTo(gateName));
+        assertThat(unblockedCount.get(), equalTo(0));
+
+        // Advance the (deterministic) clock while blocked, then let the gate allow recoveries.
+        final long blockedMillis = between(1, 120) * 1000L;
+        taskQueue.scheduleAt(taskQueue.getCurrentTimeMillis() + blockedMillis, () -> {});
+        taskQueue.advanceTime();
+        taskQueue.runAllRunnableTasks();
+
+        gate.set(RecoveryGate.Decision.RUN);
+        taskQueue.runAllRunnableTasks();
+
+        // Every recovery now runs, and the block is reported once with the elapsed blocked time and the gate that had been blocking.
+        assertThat(started.get(), equalTo(count));
+        assertThat(unblockedCount.get(), equalTo(1));
+        assertThat(unblockedGate.get(), equalTo(gateName));
+        assertThat(reportedBlockedMillis.get(), equalTo(blockedMillis));
+    }
+
+    /// A [RecoveryGate] whose decision can be switched at runtime, for tests; switching invokes its registered change handler.
+    private static final class ControllableGate implements RecoveryGate {
+        private final AtomicReference<Decision> decision;
+        private volatile Runnable gateChangeHandler = () -> {};
+
+        ControllableGate(Decision initial) {
+            this.decision = new AtomicReference<>(initial);
+        }
+
+        void set(Decision newDecision) {
+            decision.set(newDecision);
+            gateChangeHandler.run();
+        }
+
+        @Override
+        public Decision evaluate() {
+            return decision.get();
+        }
+
+        @Override
+        public void setGateChangeHandler(Runnable gateChangeHandler) {
+            this.gateChangeHandler = gateChangeHandler;
         }
     }
 
