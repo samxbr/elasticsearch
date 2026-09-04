@@ -30,9 +30,11 @@ import org.elasticsearch.rest.action.RestCancellableNodeClient;
 import org.elasticsearch.rest.action.RestResponseListener;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import static org.elasticsearch.rest.RestRequest.Method.GET;
 
@@ -124,9 +126,10 @@ public class RestCatRecoveryAction extends AbstractCatAction {
 
         Table t = getTableWithHeader(request);
 
-        for (String index : response.shardRecoveryStates().keySet()) {
+        final Map<String, List<RecoveryState>> recoveryStatesByIndex = response.shardRecoveryStates();
+        for (String index : recoveryStatesByIndex.keySet()) {
 
-            List<RecoveryState> shardRecoveryStates = response.shardRecoveryStates().get(index);
+            List<RecoveryState> shardRecoveryStates = new ArrayList<>(recoveryStatesByIndex.get(index));
             if (shardRecoveryStates.size() == 0) {
                 continue;
             }

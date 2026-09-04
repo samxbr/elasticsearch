@@ -24,6 +24,7 @@ import org.elasticsearch.common.component.AbstractLifecycleComponent;
 import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.util.concurrent.AbstractRunnable;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
+import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.gateway.PriorityComparator;
 import org.elasticsearch.index.recovery.RecoveryStats;
@@ -315,6 +316,20 @@ public final class ThrottlingRecoveryService extends AbstractLifecycleComponent 
         return pendingRecoveries.size();
     }
 
+    /// Captures which queued recoveries are currently being held by a recovery gate. The snapshot is immutable so callers can
+    /// consistently annotate every shard in a node-level recovery response without holding this service's lock while doing so.
+    public synchronized PendingRecoverySnapshot pendingRecoveries() {
+        final BlockedState state = blockedState.get();
+        if (state == null || pendingRecoveries.isEmpty()) {
+            return PendingRecoverySnapshot.EMPTY;
+        }
+        final Set<String> allocationIds = new HashSet<>(pendingRecoveries.size());
+        for (PendingRecovery pendingRecovery : pendingRecoveries) {
+            allocationIds.add(pendingRecovery.allocationId());
+        }
+        return new PendingRecoverySnapshot(state.gateName(), allocationIds);
+    }
+
     @Override
     protected void doStop() {
         assert isClosed(); // state change happens-before this line: all recoveries are discarded here or rejected during enqueue, no leaks
@@ -597,6 +612,27 @@ public final class ThrottlingRecoveryService extends AbstractLifecycleComponent 
         @Override
         protected void doRun() {
             task.accept(listener);
+        }
+    }
+
+    /// An immutable point-in-time view of queued recoveries that are being held by the node's recovery gates.
+    public static final class PendingRecoverySnapshot {
+
+        private static final PendingRecoverySnapshot EMPTY = new PendingRecoverySnapshot(null, Set.of());
+
+        private final @Nullable String gate;
+        private final Set<String> allocationIds;
+
+        private PendingRecoverySnapshot(@Nullable String gate, Set<String> allocationIds) {
+            assert gate != null || allocationIds.isEmpty();
+            this.gate = gate;
+            this.allocationIds = Set.copyOf(allocationIds);
+        }
+
+        /// Returns the gate holding the recovery with the given allocation ID, or `null` if that recovery was not gate-deferred
+        /// when this snapshot was captured.
+        public @Nullable String gateFor(String allocationId) {
+            return allocationIds.contains(allocationId) ? gate : null;
         }
     }
 
